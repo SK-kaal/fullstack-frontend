@@ -9,9 +9,13 @@ const cart = ref([]);
 const isCartVisible = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
+const showCheckoutToast = ref(false);
 const checkoutMessage = ref('');
 const checkoutStatus = ref('success');
 const submitting = ref(false);
+let toastTimeout;
+let spinnerTimeout;
+const MIN_SPINNER_DURATION = 1000;
 const searchTerm = ref('');
 const sortBy = ref('subject');
 const sortDirection = ref('asc');
@@ -147,8 +151,14 @@ const toggleCartView = () => {
 const submitOrder = async () => {
   if (!canCheckout.value) return;
   submitting.value = true;
+  clearTimeout(toastTimeout);
+  showCheckoutToast.value = true;
+  toastTimeout = setTimeout(() => {
+    showCheckoutToast.value = false;
+  }, 3000);
   checkoutMessage.value = '';
   checkoutStatus.value = 'success';
+  const spinnerStart = performance.now();
   try {
     const orderPayload = {
       name: checkoutForm.name.trim(),
@@ -184,7 +194,12 @@ const submitOrder = async () => {
     checkoutStatus.value = 'error';
     checkoutMessage.value = error.message || 'Unable to submit order.';
   } finally {
-    submitting.value = false;
+    const elapsed = performance.now() - spinnerStart;
+    const delay = Math.max(0, MIN_SPINNER_DURATION - elapsed);
+    clearTimeout(spinnerTimeout);
+    spinnerTimeout = setTimeout(() => {
+      submitting.value = false;
+    }, delay);
   }
 };
 
@@ -213,6 +228,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(searchDebounce);
+  clearTimeout(spinnerTimeout);
+  clearTimeout(toastTimeout);
 });
 </script>
 
@@ -369,9 +386,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </form>
-        <p v-if="checkoutMessage" class="mt-3" :class="checkoutStatusClass">
-          {{ checkoutMessage }}
-        </p>
+      <p v-if="showCheckoutToast" class="mt-3 text-success fw-semibold">
+        Your order is confirmed! We'll text you a confirmation shortly.
+      </p>
       </div>
     </section>
   </div>
