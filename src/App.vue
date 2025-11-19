@@ -245,7 +245,6 @@ onBeforeUnmount(() => {
             class="form-control"
             placeholder="Type to search across subject, location, price or spaces"
           />
-          <small class="text-muted">Search updates as you type and queries our Express API.</small>
         </div>
         <div class="col-md-3">
           <label class="form-label">Sort by</label>
