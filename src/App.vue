@@ -1,5 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import LessonList from './components/LessonList.vue';
+import CartSection from './components/CartSection.vue';
+import AppHeader from './components/AppHeader.vue';
+import LessonFilters from './components/LessonFilters.vue';
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
 
@@ -10,16 +14,17 @@ const isCartVisible = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
 const showCheckoutToast = ref(false);
-const checkoutMessage = ref('');
-const checkoutStatus = ref('success');
 const submitting = ref(false);
-let toastTimeout;
-let spinnerTimeout;
-const MIN_SPINNER_DURATION = 1000;
 const searchTerm = ref('');
 const sortBy = ref('subject');
 const sortDirection = ref('asc');
 const checkoutForm = reactive({ name: '', phone: '' });
+
+const MIN_SPINNER_DURATION = 1000;
+const TOAST_DURATION = 3000;
+
+let toastTimeout;
+let spinnerTimeout;
 let searchDebounce;
 
 const sortOptions = [
@@ -73,10 +78,6 @@ const canCheckout = computed(
 );
 const cartButtonDisabled = computed(() => cart.value.length === 0 && !isCartVisible.value);
 const cartButtonLabel = computed(() => (isCartVisible.value ? 'Back to lessons' : `Cart (${cartCount.value})`));
-const checkoutStatusClass = computed(() =>
-  checkoutStatus.value === 'success' ? 'text-success' : 'text-danger'
-);
-
 const requestJson = async (path, options = {}) => {
   const url = `${apiBaseUrl}${path}`;
   let response;
@@ -148,16 +149,34 @@ const toggleCartView = () => {
   isCartVisible.value = !isCartVisible.value;
 };
 
-const submitOrder = async () => {
-  if (!canCheckout.value) return;
-  submitting.value = true;
+const showToast = () => {
   clearTimeout(toastTimeout);
   showCheckoutToast.value = true;
   toastTimeout = setTimeout(() => {
     showCheckoutToast.value = false;
-  }, 3000);
-  checkoutMessage.value = '';
-  checkoutStatus.value = 'success';
+  }, TOAST_DURATION);
+};
+
+const finishWithSpinnerDelay = (startedAt) => {
+  const elapsed = performance.now() - startedAt;
+  const delay = Math.max(0, MIN_SPINNER_DURATION - elapsed);
+  clearTimeout(spinnerTimeout);
+  spinnerTimeout = setTimeout(() => {
+    submitting.value = false;
+  }, delay);
+};
+
+const resetCheckoutForm = () => {
+  cart.value = [];
+  checkoutForm.name = '';
+  checkoutForm.phone = '';
+  isCartVisible.value = false;
+};
+
+const submitOrder = async () => {
+  if (!canCheckout.value) return;
+  submitting.value = true;
+  showToast();
   const spinnerStart = performance.now();
   try {
     const orderPayload = {
@@ -183,23 +202,12 @@ const submitOrder = async () => {
       })
     );
 
-    checkoutStatus.value = 'success';
-    checkoutMessage.value = 'Order submitted successfully!';
-    cart.value = [];
-    checkoutForm.name = '';
-    checkoutForm.phone = '';
-    isCartVisible.value = false;
+    resetCheckoutForm();
     await loadLessons(searchTerm.value);
   } catch (error) {
-    checkoutStatus.value = 'error';
-    checkoutMessage.value = error.message || 'Unable to submit order.';
+    console.error('Checkout failed', error);
   } finally {
-    const elapsed = performance.now() - spinnerStart;
-    const delay = Math.max(0, MIN_SPINNER_DURATION - elapsed);
-    clearTimeout(spinnerTimeout);
-    spinnerTimeout = setTimeout(() => {
-      submitting.value = false;
-    }, delay);
+    finishWithSpinnerDelay(spinnerStart);
   }
 };
 
@@ -235,161 +243,49 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="container py-4">
-    <header class="app-header p-4 mb-4">
-      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
-        <div>
-          <p class="text-light text-uppercase mb-1">After School Hub</p>
-          <h1 class="h3 fw-bold mb-0">Discover classes & book activities</h1>
-        </div>
-        <button
-          class="btn btn-light btn-icon"
-          :disabled="cartButtonDisabled"
-          @click="toggleCartView"
-        >
+    <AppHeader>
+      <template #actions>
+        <button class="btn btn-light btn-icon" :disabled="cartButtonDisabled" @click="toggleCartView">
           <i class="fa-solid" :class="isCartVisible ? 'fa-list-ul' : 'fa-cart-shopping'"></i>
           {{ cartButtonLabel }}
         </button>
-      </div>
-    </header>
+      </template>
+    </AppHeader>
 
-    <section class="card shadow-sm p-4 mb-4">
-      <div class="row g-3 align-items-end">
-        <div class="col-md-6">
-          <label class="form-label">Search lessons</label>
-          <input
-            v-model="searchTerm"
-            type="text"
-            class="form-control"
-            placeholder="Type to search across subject, location, price or spaces"
-          />
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Sort by</label>
-          <select v-model="sortBy" class="form-select">
-            <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Order</label>
-          <select v-model="sortDirection" class="form-select">
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
-        </div>
-      </div>
-    </section>
+    <LessonFilters
+      :search-term="searchTerm"
+      :sort-by="sortBy"
+      :sort-direction="sortDirection"
+      :sort-options="sortOptions"
+      @update:searchTerm="(value) => (searchTerm = value)"
+      @update:sortBy="(value) => (sortBy = value)"
+      @update:sortDirection="(value) => (sortDirection = value)"
+    />
 
-    <section v-if="!isCartVisible">
-      <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
-      <div v-else-if="loading" class="text-center py-5">
-        <div class="spinner-border text-primary mb-3"></div>
-        <p class="mb-0">Fetching the latest lessons...</p>
-      </div>
-      <div v-else class="row g-4">
-        <div v-for="lesson in sortedLessons" :key="lesson._id" class="col-md-6 col-lg-4">
-          <div class="card lesson-card h-100">
-            <img :src="resolveImage(lesson.image)" :alt="lesson.subject" />
-            <div class="card-body d-flex flex-column">
-              <div class="d-flex justify-content-between align-items-start mb-2">
-                <h5 class="card-title mb-0">{{ lesson.subject }}</h5>
-                <span class="badge text-bg-primary">{{ lesson.day }}</span>
-              </div>
-              <p class="text-muted mb-1">
-                <i class="fa-solid fa-location-dot me-2"></i>{{ lesson.location }}
-              </p>
-              <p class="mb-1 fw-semibold">
-                <i class="fa-solid fa-sterling-sign me-2"></i>{{ formatCurrency(lesson.price) }}
-              </p>
-              <p :class="['mb-3 fw-semibold', lesson.spaces === 0 ? 'text-danger' : 'text-success']">
-                {{ lesson.spaces }} spaces left
-              </p>
-              <p class="flex-grow-1">{{ lesson.description }}</p>
-              <button
-                class="btn btn-primary mt-3"
-                :disabled="lesson.spaces === 0"
-                @click="addToCart(lesson)"
-              >
-                <i class="fa-solid fa-cart-plus me-2"></i>Add to cart
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <LessonList
+      v-if="!isCartVisible"
+      :lessons="sortedLessons"
+      :loading="loading"
+      :errorMessage="errorMessage"
+      :formatPrice="formatCurrency"
+      :resolveImage="resolveImage"
+      @add-to-cart="addToCart"
+    />
 
-    <section v-else class="card shadow-sm p-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h4 mb-0">Shopping cart</h2>
-        <span class="badge text-bg-secondary">{{ cartCount }} items</span>
-      </div>
-
-      <div v-if="cart.length === 0" class="alert alert-info">
-        Your cart is empty. Head back to the lessons list to add some activities.
-      </div>
-
-      <div v-else>
-        <ul class="list-group mb-3 cart-list">
-          <li
-            v-for="item in cart"
-            :key="item.lessonId"
-            class="list-group-item d-flex justify-content-between align-items-center"
-          >
-            <div>
-              <h6 class="mb-1">{{ item.subject }}</h6>
-              <small class="text-muted">Quantity: {{ item.quantity }} × {{ formatCurrency(item.price) }}</small>
-            </div>
-            <div class="d-flex align-items-center">
-              <strong class="me-3">{{ formatCurrency(item.price * item.quantity) }}</strong>
-              <button class="btn btn-outline-danger btn-sm" @click="removeFromCart(item.lessonId)">
-                <i class="fa-solid fa-trash-can"></i>
-              </button>
-            </div>
-          </li>
-        </ul>
-
-        <div class="d-flex justify-content-between align-items-center mb-4">
-          <strong>Total</strong>
-          <span class="fs-5 text-primary fw-bold">{{ formatCurrency(cartTotal) }}</span>
-        </div>
-
-        <form class="row g-3" @submit.prevent="submitOrder">
-          <div class="col-md-6">
-            <label class="form-label">Name</label>
-            <input
-              v-model="checkoutForm.name"
-              type="text"
-              class="form-control"
-              :class="{ 'is-invalid': checkoutForm.name && !isNameValid }"
-              placeholder="e.g. Taylor Green"
-              required
-            />
-            <div class="invalid-feedback">Letters and spaces only.</div>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label">Phone</label>
-            <input
-              v-model="checkoutForm.phone"
-              type="tel"
-              class="form-control"
-              :class="{ 'is-invalid': checkoutForm.phone && !isPhoneValid }"
-              placeholder="07123456789"
-              required
-            />
-            <div class="invalid-feedback">Digits only (minimum 6).</div>
-          </div>
-          <div class="col-12">
-            <button class="btn btn-success" type="submit" :disabled="!canCheckout">
-              <span v-if="submitting" class="spinner-border spinner-border-sm me-2"></span>
-              Checkout
-            </button>
-          </div>
-        </form>
-      <p v-if="showCheckoutToast" class="mt-3 text-success fw-semibold">
-        Your order is confirmed! We'll text you a confirmation shortly.
-      </p>
-      </div>
-    </section>
+    <CartSection
+      v-else
+      :cart="cart"
+      :cart-count="cartCount"
+      :cart-total="cartTotal"
+      :checkout-form="checkoutForm"
+      :is-name-valid="isNameValid"
+      :is-phone-valid="isPhoneValid"
+      :can-checkout="canCheckout"
+      :submitting="submitting"
+      :show-checkout-toast="showCheckoutToast"
+      :format-price="formatCurrency"
+      @remove="removeFromCart"
+      @checkout="submitOrder"
+    />
   </div>
 </template>
